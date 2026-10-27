@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>COVID-19 Outbreak Dashboard - Thailand</title>
+    
+    <!-- Tailwind CSS สำหรับการจัดการ Layout และ UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Leaflet CSS สำหรับแผนที่ -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    
+    <!-- ฟอนต์ Niramit (ภาษาไทย) เพื่อความเป็นทางการเชิงวิชาการ -->
+    <link href="https://fonts.googleapis.com/css2?family=Niramit:wght@300;400;500;600&display=swap" rel="stylesheet">
+    
+    <style>
+        body { font-family: 'Niramit', sans-serif; background-color: #f3f4f6; }
+        #map { height: 100%; width: 100%; border-radius: 0.5rem; z-index: 1; }
+        .info-card { background: white; border-radius: 0.5rem; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); padding: 1.5rem; }
+        .custom-popup .leaflet-popup-content-wrapper { border-radius: 0.5rem; }
+        .custom-popup .leaflet-popup-content { margin: 15px; font-family: 'Niramit', sans-serif; }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden">
+
+    <!-- Header -->
+    <header class="bg-teal-700 text-white p-4 shadow-md z-10 flex justify-between items-center">
+        <div>
+            <h1 class="text-2xl font-semibold">ระบบติดตามการระบาดของโรคโควิด-19 (COVID-19 Dashboard)</h1>
+            <p class="text-teal-100 text-sm mt-1">พัฒนาโดย: นักวิชาการสาธารณสุข | แหล่งข้อมูล: _final69_covid65.xlsx</p>
+        </div>
+        <div class="hidden md:block">
+            <span class="bg-teal-800 px-3 py-1 rounded-full text-xs font-medium">อัปเดตล่าสุด: อัตโนมัติ (จากไฟล์)</span>
+        </div>
+    </header>
+
+    <!-- Main Content Layout -->
+    <div class="flex-1 flex flex-col md:flex-row overflow-hidden p-4 gap-4">
+        
+        <!-- Sidebar (Data & Controls) -->
+        <aside class="w-full md:w-1/3 lg:w-1/4 flex flex-col gap-4 overflow-y-auto">
+            
+            <!-- File Upload Section -->
+            <div class="info-card">
+                <h2 class="text-lg font-semibold text-gray-800 mb-3 border-b pb-2">แหล่งข้อมูล (Data Source)</h2>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        ระบบจะพยายามอ่านไฟล์ <span class="text-teal-600 font-bold">_final69_covid65.xlsx</span> อัตโนมัติ หากไม่มีไฟล์บนเซิร์ฟเวอร์ กรุณาอัปโหลดที่นี่:
+                    </label>
+                    <input type="file" id="fileInput" accept=".xlsx, .xls" class="block w-full text-sm text-gray-500
+                        file:mr-4 file:py-2 file:px-4
+                        file:rounded-full file:border-0
+                        file:text-sm file:font-semibold
+                        file:bg-teal-50 file:text-teal-700
+                        hover:file:bg-teal-100 cursor-pointer border border-gray-300 rounded-lg" />
+                </div>
+                <div id="statusMessage" class="text-sm text-blue-600 font-medium bg-blue-50 p-2 rounded">
+                    กำลังตรวจสอบไฟล์ข้อมูลเริ่มต้น...
+                </div>
+            </div>
+
+            <!-- Summary Stats Section -->
+            <div class="info-card flex-1 flex flex-col">
+                <h2 class="text-lg font-semibold text-gray-800 mb-3 border-b pb-2">ภาพรวมระดับประเทศ</h2>
+                
+                <div class="grid grid-cols-1 gap-4 mt-2">
+                    <div class="bg-red-50 p-4 rounded-lg border-l-4 border-red-500">
+                        <p class="text-sm text-red-600 font-semibold mb-1">ผู้ติดเชื้อสะสม (Cases)</p>
+                        <p id="totalCases" class="text-2xl font-bold text-red-700">0</p>
+                    </div>
+                    <div class="bg-green-50 p-4 rounded-lg border-l-4 border-green-500">
+                        <p class="text-sm text-green-600 font-semibold mb-1">พื้นที่รายงานข้อมูล (Areas)</p>
+                        <p id="totalAreas" class="text-2xl font-bold text-green-700">0</p>
+                    </div>
+                </div>
+
+                <div class="mt-auto pt-4 text-xs text-gray-400 text-center">
+                    * รูปแบบไฟล์ Excel ควรมีคอลัมน์: ชื่อพื้นที่, Lat, Lng, และจำนวนผู้ป่วย (Cases)
+                </div>
+            </div>
+        </aside>
+
+        <!-- Map Container -->
+        <main class="w-full md:w-2/3 lg:w-3/4 bg-white rounded-lg shadow-md p-2 relative">
+            <div id="map"></div>
+            
+            <!-- Map Legend -->
+            <div class="absolute bottom-6 right-6 bg-white/90 p-3 rounded-md shadow-lg z-[1000] text-sm pointer-events-none border border-gray-200">
+                <h4 class="font-bold text-gray-700 mb-2">ความหนาแน่นผู้ป่วย</h4>
+                <div class="flex items-center gap-2 mb-1">
+                    <div class="w-4 h-4 rounded-full bg-red-600 opacity-60"></div>
+                    <span>วิกฤต (> 1000)</span>
+                </div>
+                <div class="flex items-center gap-2 mb-1">
+                    <div class="w-4 h-4 rounded-full bg-orange-500 opacity-60"></div>
+                    <span>ปานกลาง (100 - 1000)</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <div class="w-4 h-4 rounded-full bg-yellow-400 opacity-60"></div>
+                    <span>ทั่วไป (< 100)</span>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Scripts -->
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <!-- SheetJS สำหรับอ่านไฟล์ Excel บน Client -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+    <script>
+        // 1. ตั้งค่าแผนที่เริ่มต้นที่ประเทศไทย (พิกัด: 13.736717, 100.523186)
+        const map = L.map('map').setView([13.75, 100.5], 6);
+
+        // 2. ใช้ Esri ArcGIS World Street Map เป็น Basemap
+        const esriBasemap = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom, 2012',
+            maxZoom: 18
+        }).addTo(map);
+
+        // ตัวแปรเก็บ Layer ของจุดพิกัด เพื่อลบออกตอนอัปเดตข้อมูลใหม่
+        let markersLayer = L.layerGroup().addTo(map);
+
+        // ฟังก์ชันกำหนดสีและความกว้างของวงกลมตามจำนวนผู้ป่วย
+        function getMarkerStyle(cases) {
+            let color = '#facc15'; // yellow (น้อย)
+            let radius = cases * 0.05; // ขนาดขึ้นอยู่กับจำนวน
+
+            if (cases > 1000) {
+                color = '#dc2626'; // red (วิกฤต)
+                radius = cases * 0.01;
+            } else if (cases > 100) {
+                color = '#f97316'; // orange (ปานกลาง)
+                radius = cases * 0.03;
+            }
+
+            // จำกัดขนาดวงกลมไม่ให้เล็กหรือใหญ่เกินไป
+            radius = Math.max(radius, 10);
+            radius = Math.min(radius, 50);
+
+            return { color: color, radius: radius };
+        }
+
+        // ฟังก์ชันประมวลผลข้อมูล JSON ที่ได้จาก Excel และวาดลงบนแผนที่
+        function processAndMapData(dataArray) {
+            markersLayer.clearLayers(); // ล้างจุดเดิม
+            
+            let totalCases = 0;
+            let totalAreas = 0;
+            let bounds = []; // สำหรับปรับมุมกล้องแผนที่อัตโนมัติ
+
+            dataArray.forEach(row => {
+                // สมมติว่าไฟล์ Excel มีคอลัมน์ชื่อ 'Lat', 'Lng', 'Cases' (หรือภาษาไทยที่ใกล้เคียง)
+                // ระบบพยายามดึงข้อมูลจากชื่อคอลัมน์ที่เป็นไปได้
+                const lat = row.Lat || row.lat || row.Latitude || row.latitude || row['ละติจูด'];
+                const lng = row.Lng || row.lng || row.Longitude || row.longitude || row['ลองจิจูด'];
+                const cases = row.Cases || row.cases || row['ผู้ติดเชื้อ'] || row['ผู้ป่วย'] || row['จำนวนผู้ติดเชื้อ'] || 0;
+                const areaName = row.Province || row.Area || row['จังหวัด'] || row['พื้นที่'] || 'ไม่ระบุพื้นที่';
+
+                if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
+                    totalAreas++;
+                    totalCases += parseInt(cases) || 0;
+
+                    const style = getMarkerStyle(cases);
+                    
+                    const circle = L.circleMarker([lat, lng], {
+                        radius: style.radius,
+                        fillColor: style.color,
+                        color: '#fff',
+                        weight: 1,
+                        opacity: 1,
+                        fillOpacity: 0.7
+                    });
+
+                    // สร้าง Popup แสดงข้อมูล
+                    const popupContent = `
+                        <div class="font-semibold text-lg border-b pb-1 mb-2 text-gray-800">${areaName}</div>
+                        <div class="text-sm">
+                            <span class="text-gray-600">ผู้ป่วยยืนยัน: </span>
+                            <span class="font-bold text-red-600">${parseInt(cases).toLocaleString()} ราย</span>
+                        </div>
+                    `;
+
+                    circle.bindPopup(popupContent, { className: 'custom-popup' });
+                    markersLayer.addLayer(circle);
+                    bounds.push([lat, lng]);
+                }
+            });
+
+            // อัปเดตตัวเลขบนหน้าจอ
+            document.getElementById('totalCases').innerText = totalCases.toLocaleString();
+            document.getElementById('totalAreas').innerText = totalAreas.toLocaleString();
+
+            // ปรับระดับการซูมให้ครอบคลุมจุดทั้งหมด
+            if (bounds.length > 0) {
+                map.fitBounds(bounds, { padding: [50, 50] });
+            }
+        }
+
+        // ฟังก์ชันอ่านไฟล์ Excel ด้วย SheetJS
+        function readExcelData(dataBuffer, type = 'binary') {
+            try {
+                const workbook = XLSX.read(dataBuffer, { type: type });
+                // อ่านข้อมูลจาก Sheet แรก
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                
+                // แปลงข้อมูลเป็น JSON
+                const jsonData = XLSX.utils.sheet_to_json(worksheet);
+                
+                if (jsonData.length === 0) {
+                    throw new Error("ไม่พบข้อมูลในไฟล์ Excel");
+                }
+
+                processAndMapData(jsonData);
+                document.getElementById('statusMessage').className = "text-sm text-green-600 font-medium bg-green-50 p-2 rounded mt-2";
+                document.getElementById('statusMessage').innerText = "โหลดข้อมูลสำเร็จและแสดงผลบนแผนที่แล้ว";
+
+            } catch (error) {
+                console.error("Error reading Excel:", error);
+                document.getElementById('statusMessage').className = "text-sm text-red-600 font-medium bg-red-50 p-2 rounded mt-2";
+                document.getElementById('statusMessage').innerText = "เกิดข้อผิดพลาดในการประมวลผลไฟล์ กรุณาตรวจสอบรูปแบบไฟล์";
+            }
+        }
+
+        // 3. จัดการเมื่อผู้ใช้อัปโหลดไฟล์ผ่าน Input
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            document.getElementById('statusMessage').className = "text-sm text-blue-600 font-medium bg-blue-50 p-2 rounded mt-2";
+            document.getElementById('statusMessage').innerText = `กำลังประมวลผลไฟล์: ${file.name}...`;
+
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+                const data = evt.target.result;
+                readExcelData(data, 'binary');
+            };
+            reader.readAsBinaryString(file);
+        });
+
+        // 4. พยายามโหลดไฟล์ _final69_covid65.xlsx อัตโนมัติ (ในกรณีที่ไฟล์อยู่บน Server เดียวกันกับ GitHub Page)
+        async function fetchDefaultExcel() {
+            const targetFileName = '_final69_covid65.xlsx';
+            try {
+                const response = await fetch(targetFileName);
+                if (!response.ok) {
+                    throw new Error("File not found");
+                }
+                const arrayBuffer = await response.arrayBuffer();
+                const data = new Uint8Array(arrayBuffer);
+                readExcelData(data, 'array');
+                
+            } catch (error) {
+                // หากไม่พบไฟล์ จะใส่ Mock Data เบื้องต้นให้เห็นภาพการทำงาน
+                console.log(`ไม่พบไฟล์ ${targetFileName} บนเซิร์ฟเวอร์ - สร้างข้อมูลตัวอย่าง (Mock Data) แทน`);
+                
+                document.getElementById('statusMessage').className = "text-sm text-yellow-700 font-medium bg-yellow-50 p-2 rounded mt-2";
+                document.getElementById('statusMessage').innerHTML = `
+                    ไม่พบไฟล์ <b>${targetFileName}</b> บนระบบ <br> 
+                    *แสดงข้อมูลตัวอย่าง* โปรดอัปโหลดไฟล์ด้วยตนเอง
+                `;
+
+                // ข้อมูลตัวอย่างสมมติ
+                const mockData = [
+                    { "จังหวัด": "กรุงเทพมหานคร", "Lat": 13.7563, "Lng": 100.5018, "Cases": 5200 },
+                    { "จังหวัด": "เชียงใหม่", "Lat": 18.7061, "Lng": 98.9817, "Cases": 850 },
+                    { "จังหวัด": "ภูเก็ต", "Lat": 7.9519, "Lng": 98.3381, "Cases": 1200 },
+                    { "จังหวัด": "ชลบุรี", "Lat": 13.3611, "Lng": 100.9850, "Cases": 2100 },
+                    { "จังหวัด": "ขอนแก่น", "Lat": 16.4322, "Lng": 102.8236, "Cases": 400 },
+                    { "จังหวัด": "สงขลา", "Lat": 7.1898, "Lng": 100.5954, "Cases": 650 }
+                ];
+                processAndMapData(mockData);
+            }
+        }
+
+        // เริ่มต้นการทำงานเมื่อโหลดหน้าจอเสร็จ
+        window.onload = () => {
+            fetchDefaultExcel();
+        };
+
+    </script>
+</body>
+</html>
